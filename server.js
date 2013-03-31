@@ -18,12 +18,6 @@ var BUCKET = 'debby'
 var REGION = 'eu-west-1'
 
 
-var s3Client = s3Lib.createClient({
-    key: AWS.config.credentials.accessKeyId
-  , secret: AWS.config.credentials.secretAccessKey
-  , bucket: BUCKET
-  , region: REGION
-});
 
 var knoxClient = knox.createClient({
     key: AWS.config.credentials.accessKeyId
@@ -31,6 +25,8 @@ var knoxClient = knox.createClient({
   , bucket: BUCKET
   , region: REGION
 });
+
+var s3Client = s3Lib.fromKnox(knoxClient);
 
 s3.client.listObjects( 
 	{ 'Bucket': BUCKET, 'Prefix': 'deb/'},
