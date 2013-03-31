@@ -15,6 +15,7 @@
     "s3": "x.x.x",
     "express": "3.x.x",
     "knox": "x.x.x",
-    "kat": "x.x.x"
+    "kat": "x.x.x",
+    "async": "x.x.x"
   }
 }
