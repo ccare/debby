@@ -40,8 +40,6 @@ s3.client.listObjects(
 	})
 )
 
-//cleanUpTempDirs()
-
 function toNameList(objects, prefix, extn) {
 	var names = []
 	objects.forEach(function(item, idx) {
@@ -92,6 +90,7 @@ function buildMetadataFile(deb, meta) {
 	});
 	downloader.on('end', function() {
 	  console.log("done");
+	  createMetaAndUpload(tmpFolder, tmpFile, meta);
 	});
 }
 
@@ -106,10 +105,9 @@ function createMetaAndUpload(tmpFolder, localDebFile, meta) {
 	    console.log('stdout: ' + stdout);
 	    console.log('stderr: ' + stderr);
 	    if (error !== null) {
-	      console.log('STOPPING exec error: ' + error);
-	    } else {
-			uploadMeta(tmpFolder + "/" + meta, "/meta/" + meta)
-		}
+	      console.log('exec error: ' + error);
+	    }
+		uploadMeta(tmpFolder + "/" + meta, "/meta/" + meta)
 	});
 
 }
@@ -120,10 +118,7 @@ function uploadMeta(localMetaFile, meta) {
 	  console.error("unable to upload:", err.stack);
 	});
 	uploader.on('end', function() {
-	  console.log("done removing " + tmpFolder);	  
-	});
-	uploader.on('error', function(err) {
-	  console.log("ERRORED. removing " + tmpFolder);
+	  console.log("done");
 	});
 }
 
@@ -141,9 +136,9 @@ function onSuccess(fn) {
 var crypto = require('crypto');
 
 
-function cleanUpTempDirs() {
-	exec('rm -rf debby__*', { encoding: 'utf8', cwd: '/tmp' })
-}
+
+
+
 
 app.get('/Packages', function(req, res) {
         res.header('content-type', 'text/plain')
