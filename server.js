@@ -7,6 +7,8 @@ var fs = require('fs');
 var knox = require('knox');
 var Kat = require('kat');
 var zlib = require('zlib');
+var async = require('async');
+var crypto = require('crypto');
 
 AWS.config.loadFromPath('./config.json');
 var s3 = new AWS.S3();
@@ -17,8 +19,6 @@ var app = require('express')(),
 var BUCKET = 'debby'
 var REGION = 'eu-west-1'
 
-
-
 var knoxClient = knox.createClient({
     key: AWS.config.credentials.accessKeyId
   , secret: AWS.config.credentials.secretAccessKey
@@ -28,95 +28,121 @@ var knoxClient = knox.createClient({
 
 var s3Client = s3Lib.fromKnox(knoxClient);
 
-s3.client.listObjects( 
-	{ 'Bucket': BUCKET, 'Prefix': 'deb/'},
-	onSuccess(function(response) {
-		var debFileNames = toNameList(response.Contents, 'deb/', '.deb')
-		findMissingMetaFiles(debFileNames)
-	})
-)
 
-function toNameList(objects, prefix, extn) {
-	var names = []
-	objects.forEach(function(item, idx) {
-		var name = item.Key;
-		if (Str(name).endsWith(extn)) {
-			names.push(name.replace(prefix, ''))
-		}
-	})
-	return names;
-}
+var Indexer = require('./lib/indexer').Indexer
 
-function findMissingMetaFiles(debFileNames) {
-	s3.client.listObjects( 
-		{ 'Bucket': BUCKET, 'Prefix': 'meta/'},
-		onSuccess(function(response) {
-			var metaFileNames = toNameList(response.Contents, 'meta/', '.meta')
-			compareMetaAndDeb(debFileNames, metaFileNames)
-		})
-	)
-}
 
-function compareMetaAndDeb(debs, metas) {
-	console.log("Debs: %j", debs);
-	console.log("Metas: %j", metas);
-	var missing = []
-	debs.forEach(function(deb, idx) {
-		var expectedMeta = deb + ".meta";
-		if (metas.indexOf(expectedMeta) < 0) {
-			missing.push( { 'deb': deb, 'meta': expectedMeta } )
-		}
-	})
-	console.log("Missing: %j", missing);
-	missing.forEach(function(missingMeta) {
-		buildMetadataFile(missingMeta.deb, missingMeta.meta)
-	})
-}
+new Indexer(knoxClient).reIndex();
 
-function buildMetadataFile(deb, meta) {
-	console.log("%s -> %s", deb, meta);
-	var tmpFolder = "/tmp/debby__" + deb + "__" + Date.now();
-	console.log("Mkdir %s", tmpFolder);
-	fs.mkdirSync(tmpFolder);
-	fs.mkdirSync(tmpFolder + "/pool");
-	var tmpFile = tmpFolder + "/pool/" + deb;
-	var downloader = s3Client.download("/deb/" + deb, tmpFile);
-	downloader.on('error', function(err) {
-	  console.error("unable to download:", err.stack);
-	});
-	downloader.on('end', function() {
-	  console.log("done");
-	  createMetaAndUpload(tmpFolder, tmpFile, meta);
-	});
-}
 
-function createMetaAndUpload(tmpFolder, localDebFile, meta) {
-	// fork process, catch output
-	exec('dpkg-scanpackages pool >' + meta,
-		{ encoding: 'utf8',
-			  timeout: 5000,
-			  killSignal: 'SIGTERM',
-			  cwd: tmpFolder },
-	  function(error, stdout, stderr) {
-	    console.log('stdout: ' + stdout);
-	    console.log('stderr: ' + stderr);
-	    if (error !== null) {
-	      console.log('exec error: ' + error);
-	    }
-		uploadMeta(tmpFolder + "/" + meta, "/meta/" + meta)
-	});
 
-}
 
-function uploadMeta(localMetaFile, meta) {
-	var uploader = s3Client.upload(localMetaFile, meta);
-	uploader.on('error', function(err) {
-	  console.error("unable to upload:", err.stack);
-	});
-	uploader.on('end', function() {
-	  console.log("done");
-	});
-}
+
+// function createMetaAndUpload(tmpFolder, localDebFile, meta) {
+// 	// fork process, catch output
+// 	exec('dpkg-scanpackages pool >' + meta,
+// 		{ encoding: 'utf8',
+// 			  timeout: 5000,
+// 			  killSignal: 'SIGTERM',
+// 			  cwd: tmpFolder },
+// 	  function(error, stdout, stderr) {
+// 	    console.log('stdout: ' + stdout);
+// 	    console.log('stderr: ' + stderr);
+// 	    if (error !== null) {
+// 	      console.log('exec error: ' + error);
+// 	    }
+// 		uploadMeta(tmpFolder + "/" + meta, "/meta/" + meta)
+// 	});
+
+// }
+
+
+// function report(r, callback) {
+// 	console.log("WATERFALL DONE - %j", r)
+// }
+
+// // s3.client.listObjects( 
+// // 	{ 'Bucket': BUCKET, 'Prefix': 'deb/'},
+// // 	onSuccess(function(response) {
+// // 		var debFileNames = toNameList(response.Contents, 'deb/', '.deb')
+// // 		findMissingMetaFiles(debFileNames)
+// // 	})
+// // )
+
+
+
+
+
+// function findMissingMetaFiles(debFileNames) {
+// 	s3.client.listObjects( 
+// 		{ 'Bucket': BUCKET, 'Prefix': 'meta/'},
+// 		onSuccess(function(response) {
+// 			var metaFileNames = toNameList(response.Contents, 'meta/', '.meta')
+// 			compareMetaAndDeb(debFileNames, metaFileNames)
+// 		})
+// 	)
+// }
+
+// function compareMetaAndDeb(debs, metas) {
+// 	console.log("Debs: %j", debs);
+// 	console.log("Metas: %j", metas);
+// 	var missing = []
+// 	debs.forEach(function(deb, idx) {
+// 		var expectedMeta = deb + ".meta";
+// 		if (metas.indexOf(expectedMeta) < 0) {
+// 			missing.push( { 'deb': deb, 'meta': expectedMeta } )
+// 		}
+// 	})
+// 	console.log("Missing: %j", missing);
+// 	missing.forEach(function(missingMeta) {
+// 		buildMetadataFile(missingMeta.deb, missingMeta.meta)
+// 	})
+// }
+
+// function buildMetadataFile(deb, meta) {
+// 	console.log("%s -> %s", deb, meta);
+// 	var tmpFolder = "/tmp/debby__" + deb + "__" + Date.now();
+// 	console.log("Mkdir %s", tmpFolder);
+// 	fs.mkdirSync(tmpFolder);
+// 	fs.mkdirSync(tmpFolder + "/pool");
+// 	var tmpFile = tmpFolder + "/pool/" + deb;
+// 	var downloader = s3Client.download("/deb/" + deb, tmpFile);
+// 	downloader.on('error', function(err) {
+// 	  console.error("unable to download:", err.stack);
+// 	});
+// 	downloader.on('end', function() {
+// 	  console.log("done");
+// 	  createMetaAndUpload(tmpFolder, tmpFile, meta);
+// 	});
+// }
+
+// function createMetaAndUpload(tmpFolder, localDebFile, meta) {
+// 	// fork process, catch output
+// 	exec('dpkg-scanpackages pool >' + meta,
+// 		{ encoding: 'utf8',
+// 			  timeout: 5000,
+// 			  killSignal: 'SIGTERM',
+// 			  cwd: tmpFolder },
+// 	  function(error, stdout, stderr) {
+// 	    console.log('stdout: ' + stdout);
+// 	    console.log('stderr: ' + stderr);
+// 	    if (error !== null) {
+// 	      console.log('exec error: ' + error);
+// 	    }
+// 		uploadMeta(tmpFolder + "/" + meta, "/meta/" + meta)
+// 	});
+
+// }
+
+// function uploadMeta(localMetaFile, meta) {
+// 	var uploader = s3Client.upload(localMetaFile, meta);
+// 	uploader.on('error', function(err) {
+// 	  console.error("unable to upload:", err.stack);
+// 	});
+// 	uploader.on('end', function() {
+// 	  console.log("done");
+// 	});
+// }
 
 function onSuccess(fn) {
 	return function(err, data) {
@@ -129,7 +155,6 @@ function onSuccess(fn) {
 }
 
 
-var crypto = require('crypto');
 
 
 
@@ -141,12 +166,12 @@ app.get('/Packages', function(req, res) {
  		buildPackageBody(res)
 		})
 
-// app.get('/Packages.gz', function(req, res) {
-//         res.header('content-type', 'text/plain')
-//         var out = zlib.createGzip();
-//  		buildPackageBody(out)
-//  		out.pipe(res)
-// 		})
+		app.get('/Packages.gz', function(req, res) {
+		        res.header('content-type', 'text/plain')
+		        var out = zlib.createGzip();
+		 		buildPackageBody(out)
+		 		out.pipe(res)
+				})
 
 app.get('/Release', function(req, res) {
 	 buildRelease(res)
@@ -219,7 +244,9 @@ function buildPackageBody(out) {
 	s3.client.listObjects( 
 		{ 'Bucket': BUCKET, 'Prefix': 'meta/'},
 		onSuccess(function(response) {
+			console.log("Streaming packages");
 			var metaFileNames = toNameList(response.Contents, '', '.meta')
+			console.log("%j", metaFileNames);
 			streamMetas(metaFileNames, 0, out)
 		})
 	)
@@ -269,3 +296,15 @@ function streamAndHashMetas(metas, idx, md5sum, size, callback) {
 			});			
 		}).end()
 }
+
+
+function toNameList(objects, prefix, extn) {
+		var names = []
+		objects.forEach(function(item, idx) {
+			var name = item.Key;
+			if (Str(name).endsWith(extn)) {
+				names.push(name.replace(prefix, ''))
+			}
+		})
+		return names;
+	}
