@@ -19,6 +19,10 @@ var app = require('express')(),
 
 var BUCKET = 'debby'
 var REGION = 'eu-west-1'
+var REPO_ORIGIN = 'ccare'
+var REPO_LABEL = 'ccare'
+var REPO_ARCH = 'amd64'
+var REPO_DESCRIPTION = 'ccare repo'
 
 var knoxClient = knox.createClient({
     key: AWS.config.credentials.accessKeyId
@@ -36,18 +40,15 @@ var Indexer = require('./lib/indexer').Indexer
 new Indexer(knoxClient).reIndex();
 
 
-
-
-
-function onSuccess(fn) {
-	return function(err, data) {
-		if (err != undefined || err != null) { 
-			console.log("ERROR: %j", err);
-		} else {
-			fn(data)
-		}
-	};
+function buildReleaseText(md5, size) {
+	return "Origin: " + REPO_ORIGIN + "\n"
+	+"Label: " + REPO_LABEL + "\n"
+	+"Architectures: " + REPO_ARCH + "\n"
+	+"Description: " + REPO_DESCRIPTION + "\n"
+	+"MD5Sum:\n"
+	+" " + md5 + "      " + size + " Packages\n"
 }
+
 
 
 
@@ -70,14 +71,14 @@ app.get('/Packages.gz', function(req, res) {
 
 app.get('/Release', function(req, res) {
     res.header('content-type', 'text/plain')
-	buildRelease2(function(contents) {
+	buildRelease(function(contents) {
 		res.status(200).send(contents)
 	})
 })
 
 app.get('/Release.gpg', function(req, res) {
     res.header('content-type', 'text/plain')
-	buildRelease2(function(contents, callback) {
+	buildRelease(function(contents, callback) {
 		var gpb = spawn('gpg', ['-v', '--output', '-', '-u', 'Deb Repo', '-ba']);
       	gpb.stdout.pipe(res)
 	    gpb.stdin.write(contents) 
@@ -85,20 +86,21 @@ app.get('/Release.gpg', function(req, res) {
 	})
 })
 
-app.get('/pool/:deb', function(req, hres) {
+app.get('/pool/:deb', function(req, res) {
 	var deb = req.params.deb;
 	if (!Str(deb).endsWith('.deb')) {
 		hres.send(404, "Not found.\n")
 	}
+	streamObject('/deb/' + deb, res) 
+})
 
-    	knoxClient.get('/deb/' + deb)
-        .on('response', function(s3Res) {
-        	console.log("streaming out deb");
-			s3Res.pipe(hres);
+function streamObject(object, out) {
+	knoxClient.get(object)
+	    .on('response', function(res) {
+	    	console.log("streaming out deb");
+			res.pipe(out);
 		}).end()
-		})
-
-
+}
 
 function buildPackageBody(out) {
 	async.waterfall([
@@ -110,7 +112,7 @@ function buildPackageBody(out) {
 }
 
 
-function buildRelease2(outerCallback) {
+function buildRelease(outerCallback) {
 	async.waterfall([
 		listObjects(BUCKET, 'meta/', '.meta'),
 		function(fileNames, callback) {
@@ -151,14 +153,6 @@ function buildRelease2(outerCallback) {
 
 
 
-function buildReleaseText(md5, size) {
-	return "Origin: ccare\n"
-	+"Label: ccare\n"
-	+"Architectures: amd64\n"
-	+"Description: ccare repo\n"
-	+"MD5Sum:\n"
-	+" " + md5 + "      " + size + " Packages\n"
-}
 
 
 
@@ -195,10 +189,14 @@ function listObjects(bucket, prefix, extension) {
 	return function(callback) {
 		s3.client.listObjects( 
 			{ 'Bucket': bucket, 'Prefix': prefix},
-			onSuccess(function(response) {
-				var objectNames = toNameList(response.Contents, '', extension)
-				callback(null, objectNames)
-			})
+			function(err, response) {
+				if (err != null) {
+					callback(err, null)
+				} else {
+					var objectNames = toNameList(response.Contents, '', extension)
+					callback(null, objectNames)
+				}
+			}
 		)
 	}
 }
