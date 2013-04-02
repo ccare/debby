@@ -162,32 +162,39 @@ function onSuccess(fn) {
 
 
 app.get('/Packages', function(req, res) {
-        res.header('content-type', 'text/plain')
- 		buildPackageBody(res)
-		})
+    res.header('content-type', 'text/plain')
+	buildPackageBody(res)
+})
 
-		app.get('/Packages.gz', function(req, res) {
-		        res.header('content-type', 'text/plain')
-		        var out = zlib.createGzip();
-		 		buildPackageBody(out)
-		 		out.pipe(res)
-				})
+app.get('/Packages.gz', function(req, res) {
+	res.header('content-type', 'application/x-gzip')
+	var out = zlib.createGzip();
+	buildPackageBody(out)
+	out.pipe(res)
+})
 
 app.get('/Release', function(req, res) {
+    res.header('content-type', 'text/plain')
 	 buildRelease(res)
 })
 
-function buildRelease(res, callback) {
-	s3.client.listObjects( 
-		{ 'Bucket': BUCKET, 'Prefix': 'meta/'},
-		onSuccess(function(response) {
-			var metaFileNames = toNameList(response.Contents, '', '.meta')
-			streamAndHashMetas(metaFileNames, 0, null, 0, function(err, md5, size) {
-				sendRelease(md5, size, res)
-			})
-		})
-	)
-}
+app.get('/Release2', function(req, res) {
+    res.header('content-type', 'text/plain')
+	buildRelease2(function(contents) {
+		res.status(200).send(contents)
+	})
+})
+
+app.get('/Release2.gpg', function(req, res) {
+    res.header('content-type', 'text/plain')
+	buildRelease2(function(contents, callback) {
+		var gpb = spawn('gpg', ['-v', '--output', '-', '-u', 'Deb Repo', '-ba']);
+      	gpb.stdout.pipe(res)
+	    gpb.stdin.write(contents) 
+	    gpb.stdin.end();
+	})
+})
+
 
 function buildReleaseText(md5, size) {
 	return "Origin: ccare\n"
@@ -240,33 +247,148 @@ app.get('/pool/:deb', function(req, hres) {
 
 server.listen(3000)
 
-function buildPackageBody(out) {
+function buildRelease(res, callback) {
 	s3.client.listObjects( 
 		{ 'Bucket': BUCKET, 'Prefix': 'meta/'},
 		onSuccess(function(response) {
-			console.log("Streaming packages");
 			var metaFileNames = toNameList(response.Contents, '', '.meta')
-			console.log("%j", metaFileNames);
-			streamMetas(metaFileNames, 0, out)
+			streamAndHashMetas(metaFileNames, 0, null, 0, function(err, md5, size) {
+				sendRelease(md5, size, res)
+			})
 		})
 	)
 }
 
-function streamMetas(metas, idx, out) {
+
+
+function buildRelease2(outerCallback) {
+	async.waterfall([
+		listObjects(BUCKET, 'meta/', '.meta'),
+		function(fileNames, callback) {
+			var md5sum = crypto.createHash('md5');
+			var size = 0;
+			async.eachSeries(fileNames, 
+				function(item, cb) {
+					knoxClient.get(item)
+       				.on('response', function(s3Res) {
+        				s3Res.on('data', function(d) {
+			  				md5sum.update(d);
+			  				size = size + d.length
+						});
+						s3Res.on('end', function() {
+							cb();
+						})
+					}).end()
+       			},
+       			function(err) {
+       				var d = md5sum.digest('hex');
+  					callback(null, buildReleaseText(d, size))
+       			}
+			);			
+		},
+		outerCallback
+	]);
+}
+
+function computeDigest(callback) {
+	var md5sum = crypto.createHash('md5');
+	return function(object, callback) {
+		knoxClient.get(object)
+			.on('response', function(s3Res) {
+				s3Res.pipe(out, { end: false });
+				s3Res.on('end', function() {
+					callback();        				
+				})
+			})
+			.on('error', function(err) {
+				callback(err);
+			}).end()
+	}
+}
+
+
+function streamAndHashMetas2(metas, idx, md5sum, size, callback) {
+	if (md5sum == null) {
+		md5sum = crypto.createHash('md5');
+	}
+	if (size == null) {
+		size = 0;
+	}
 	var meta = metas[idx]
 	var isLast = metas.length == (idx+1)
-	console.log(meta + isLast);
 	knoxClient.get(meta)
         .on('response', function(s3Res) {
-        	console.log("streaming");
-			s3Res.pipe(out, { end: isLast });
+        	console.log("HASHING STREAM");
+			s3Res.on('data', function(d) {
+			  md5sum.update(d);
+			  size = size + d.length
+			});
 			s3Res.on('end', function() {
-				if ( ! isLast) {
-	        		console.log("recursing");
-					streamMetas(metas, idx+1, out)
+			  	if ( ! isLast) {
+					streamAndHashMetas(metas, idx+1, md5sum, size, callback)
+				} else {
+					var d = md5sum.digest('hex');
+  					console.log('MD5: ' + d);
+  					callback(null, d, size)
 				}
-			})
+			});			
 		}).end()
+}
+
+
+function buildPackageBody(out) {
+	async.waterfall([
+		listObjects(BUCKET, 'meta/', '.meta'),
+		foreachObject(concatObjectToStream(out))
+	], 
+	streamEnd(out)
+	);
+}
+
+function foreachObject(writer) {
+	return function(fileNames, callback) {
+		async.eachSeries(fileNames, 
+			writer, 
+			function(err) {
+				if (err != null) {
+					callback(err, null)
+				}
+				callback()
+			})
+	}
+}
+
+function streamEnd(out) {
+	return function(err) {
+		out.end()
+	}
+}
+
+function listObjects(bucket, prefix, extension) {
+	return function(callback) {
+		s3.client.listObjects( 
+			{ 'Bucket': bucket, 'Prefix': prefix},
+			onSuccess(function(response) {
+				var objectNames = toNameList(response.Contents, '', extension)
+				callback(null, objectNames)
+			})
+		)
+	}
+}
+
+function concatObjectToStream(out) {
+	return function(object, callback) {
+		knoxClient.get(object)
+			.on('response', function(s3Res) {
+				s3Res.pipe(out, { end: false });
+				s3Res.on('end', function() {
+					callback();        				
+				})
+			})
+			.on('error', function(err) {
+				callback(err);
+			}).end()
+	}
 }
 
 function streamAndHashMetas(metas, idx, md5sum, size, callback) {
