@@ -86,6 +86,7 @@ app.get('/Release.gpg', function(req, res) {
 	})
 })
 
+
 app.get('/pool/:deb', function(req, res) {
 	var deb = req.params.deb;
 	if (!Str(deb).endsWith('.deb')) {
@@ -94,10 +95,25 @@ app.get('/pool/:deb', function(req, res) {
 	streamObject('/deb/' + deb, res) 
 })
 
+app.get('/Packages2', function(req, res) {
+    res.header('content-type', 'text/plain')
+	streamObject('/repo/Packages', res) 
+})
+
+app.get('/Release2', function(req, res) {
+    res.header('content-type', 'text/plain')
+	streamObject('/repo/Release', res) 
+})
+
+app.get('/Release2.gpg', function(req, res) {
+    res.header('content-type', 'text/plain')
+	streamObject('/repo/Release.gpg', res) 
+})
+
 function streamObject(object, out) {
 	knoxClient.get(object)
 	    .on('response', function(res) {
-	    	console.log("streaming out deb");
+	    	console.log("streaming out object %s", object);
 			res.pipe(out);
 		}).end()
 }
