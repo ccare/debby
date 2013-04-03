@@ -1,15 +1,8 @@
 var express = require('express')
 var AWS = require('aws-sdk');
 var Str = require('string');
-var s3Lib = require('s3');
-var exec = require('child_process').exec, child;
-var fs = require('fs');
 var knox = require('knox');
-var Kat = require('kat');
 var zlib = require('zlib');
-var async = require('async');
-var crypto = require('crypto');
-var spawn = require('child_process').spawn;
 
 AWS.config.loadFromPath('./config.json');
 var s3 = new AWS.S3();
@@ -19,10 +12,6 @@ var app = require('express')(),
 
 var BUCKET = 'debby'
 var REGION = 'eu-west-1'
-var REPO_ORIGIN = 'ccare'
-var REPO_LABEL = 'ccare'
-var REPO_ARCH = 'amd64'
-var REPO_DESCRIPTION = 'ccare repo'
 
 var knoxClient = knox.createClient({
     key: AWS.config.credentials.accessKeyId
@@ -30,8 +19,6 @@ var knoxClient = knox.createClient({
   , bucket: BUCKET
   , region: REGION
 });
-
-var s3Client = s3Lib.fromKnox(knoxClient);
 
 
 var Indexer = require('./lib/indexer').Indexer
