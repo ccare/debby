@@ -5,7 +5,6 @@ var knox = require('knox');
 var zlib = require('zlib');
 
 AWS.config.loadFromPath('./config.json');
-var s3 = new AWS.S3();
 
 var app = require('express')(),
     server = require('http').createServer(app)
@@ -22,9 +21,8 @@ var knoxClient = knox.createClient({
 
 
 var Indexer = require('./lib/indexer').Indexer
-
-
 var indexer = new Indexer(knoxClient)
+
 
 indexer.updateIndexes();
 
