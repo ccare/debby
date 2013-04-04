@@ -3,6 +3,8 @@ var AWS = require('aws-sdk');
 var Str = require('string');
 var knox = require('knox');
 var zlib = require('zlib');
+var timers = require('timers');
+
 
 AWS.config.loadFromPath('./config.json');
 
@@ -11,7 +13,9 @@ var app = require('express')(),
 
 var BUCKET = 'debby'
 var REGION = 'eu-west-1'
+var FIVE_MINUTES = 5*60*1000;
 
+// S3 client
 var knoxClient = knox.createClient({
     key: AWS.config.credentials.accessKeyId
   , secret: AWS.config.credentials.secretAccessKey
@@ -20,12 +24,16 @@ var knoxClient = knox.createClient({
 });
 
 
+// Indexer (pass in S3 client)
 var Indexer = require('./lib/indexer').Indexer
 var indexer = new Indexer(knoxClient)
 
-
+// Index now, and then every 5 mins
 indexer.updateIndexes();
+timers.setInterval(indexer.updateIndexes, FIVE_MINUTES);
 
+
+// Web app to expose repository
 
 app.get('/pool/:deb', function(req, res) {
 	var deb = req.params.deb;
@@ -59,12 +67,12 @@ app.get('/Release.gpg', function(req, res) {
 
 app.post('/updateIndexes', function(req, res) {
 	indexer.updateIndexes();
-    res.send("OK")
+    res.send(202, "Update index request accepted.\n")
 })
 
 app.post('/reindex', function(req, res) {
 	indexer.reIndex();
-    res.send("OK")
+    res.send(202, "Re-index request accepted.\n")
 })
 
 function streamObject(object, out) {
@@ -74,9 +82,6 @@ function streamObject(object, out) {
 			res.pipe(out);
 		}).end()
 }
-
-
-
 
 server.listen(3000)
 
