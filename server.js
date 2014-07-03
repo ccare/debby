@@ -51,7 +51,7 @@ app.get('/Packages', function(req, res) {
 app.get('/Packages.gz', function(req, res) {
 	res.header('content-type', 'application/x-gzip')
 	var out = zlib.createGzip();
-	streamObject('/repo/Release', out) 
+	streamObject('/repo/Packages', out) 
 	out.pipe(res)
 })
 
